@@ -1,0 +1,122 @@
+name: discord-presence
+label: Discord Presence
+version: 1.0.0
+manifest_version: 2
+api_version: 1
+license: MIT
+homepage: https://github.com/kyssta-exe/hermes-discord-presence
+author: kyssta
+description: >
+  Publishes live Hermes agent telemetry as the Discord bot's presence —
+  tokens per second, prompt-cache hit rate, context-window occupancy, and the
+  tool currently running, the same numbers the desktop app's bottom status bar
+  shows. Adds a /pulse slash command, an agent_pulse tool, and a
+  `hermes discord-presence` CLI command. Observer-only: no prompt rewriting,
+  no tool overrides, no core changes.
+tags: [gateway, discord, observability, metrics, presence, status]
+
+provides_tools:
+  - agent_pulse
+
+provides_hooks:
+  - pre_api_request
+  - post_api_request
+  - api_request_error
+  - pre_tool_call
+  - post_tool_call
+  - pre_llm_call
+  - post_llm_call
+
+# The plugin works with or without the Discord platform installed: with it, the
+# presence publishes; without it, /pulse, the tool and the CLI still answer.
+# discord.py itself is supplied by the bundled discord-platform plugin, so this
+# plugin declares no Python dependencies of its own.
+
+config_schema:
+  enabled:
+    type: bool
+    default: true
+    label: Enabled
+    description: Publish agent telemetry as the Discord bot presence
+  mode:
+    type: str
+    choices: [rotate, compact]
+    default: rotate
+    label: Layout
+    description: rotate = one metric per update; compact = every metric joined on one line
+  activity_type:
+    type: str
+    choices: [custom, playing, watching, listening, competing]
+    default: custom
+    label: Activity type
+    description: Discord activity kind — custom status, or Playing/Watching/Listening/Competing
+  update_interval_seconds:
+    type: int
+    default: 20
+    label: Update interval (s)
+    description: Seconds between presence updates (10-600). Discord allows ~5 per 20s.
+  status_emoji:
+    type: str
+    default: "📊"
+    label: Status emoji
+    description: Leading emoji for the custom status
+  idle_after_seconds:
+    type: int
+    default: 180
+    label: Idle after (s)
+    description: Switch the presence dot to idle after this long with no activity
+  context_warn_percent:
+    type: int
+    default: 80
+    label: Context warn (%)
+    description: Context occupancy that switches the presence dot to dnd
+  show_tokens_per_second:
+    type: bool
+    default: true
+    label: Tokens/sec
+    description: Show throughput (windowed sum of output tokens / sum of durations)
+  show_cache_hit:
+    type: bool
+    default: true
+    label: Cache hit rate
+    description: Show prompt-cache hit rate (cache reads / prompt tokens)
+  show_context:
+    type: bool
+    default: true
+    label: Context usage
+    description: Show context-window occupancy
+  show_context_bar:
+    type: bool
+    default: true
+    label: Context bar
+    description: Draw the block-character context bar beside the percentage
+  show_tool:
+    type: bool
+    default: true
+    label: Running tool
+    description: Show the tool the agent is executing right now
+  show_model:
+    type: bool
+    default: true
+    label: Model
+    description: Show the active model
+  show_latency:
+    type: bool
+    default: false
+    label: Latency
+    description: Show mean request latency
+  show_totals:
+    type: bool
+    default: false
+    label: Lifetime tokens
+    description: Show the session's lifetime token total
+  bar_width:
+    type: int
+    default: 10
+    label: Bar width
+    description: Context bar cells (3-20)
+  separator:
+    type: str
+    default: " · "
+    label: Separator
+    description: String between segments in compact mode

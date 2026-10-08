@@ -1,0 +1,35 @@
+[project]
+name = "hermes-discord-presence"
+version = "1.0.0"
+description = "Publish live Hermes agent telemetry (tokens/sec, cache hit rate, context usage) as a Discord bot presence"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "kyssta" }]
+keywords = ["hermes", "hermes-agent", "discord", "plugin", "observability", "metrics", "presence"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+# No runtime dependencies on purpose: discord.py is supplied by the bundled
+# discord-platform plugin, and this plugin imports it lazily inside the
+# platform-handler factory so register() never needs it installed.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/kyssta-exe/hermes-discord-presence"
+Documentation = "https://hermes-agent.nousresearch.com/docs/developer-guide/plugins"
+Issues = "https://github.com/kyssta-exe/hermes-discord-presence/issues"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# This pyproject declares the plugin's Python requirements for PM admission when
+# a user installs it with `hermes plugins install`. It is NOT a buildable wheel:
+# a Hermes directory plugin is loaded from the directory as-is (plugin.yaml plus
+# sibling modules), so the package layout is deliberately left unset and the
+# test/lint config lives in the repository root's pyproject.toml instead.

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dev deps
+        run: pip install "pytest>=8,<9" pyyaml
+
+      # The 98 unit tests need nothing but Python: render.py and metrics.py have
+      # no discord import, and conftest.py bootstraps the flat plugin directory
+      # the same way Hermes' own capability probe does.
+      - name: Unit tests
+        run: python -m pytest tests/ -q
+
+      - name: Lint
+        run: |
+          pip install "ruff>=0.6,<1"
+          ruff check discord-presence/ tests/
+
+  validate:
+    # The catalog admission gate. Runs the same check `hermes plugins validate`
+    # runs in CI for catalog entries.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Hermes Agent
+        run: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+
+      - name: Validate the plugin
+        run: hermes plugins validate discord-presence
+
+      - name: Doctor
+        run: hermes plugins doctor discord-presence
