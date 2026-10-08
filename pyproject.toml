@@ -28,12 +28,16 @@ Homepage = "https://github.com/kyssta-exe/hermes-discord-presence"
 Documentation = "https://hermes-agent.nousresearch.com/docs/developer-guide/plugins"
 Issues = "https://github.com/kyssta-exe/hermes-discord-presence/issues"
 
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-py-modules = []
+# The installable plugin lives in ./discord-presence — a flat directory plugin
+# (plugin.yaml plus sibling modules), which is what `hermes plugins install`
+# copies into ~/.hermes/plugins/. It carries its own pyproject.toml so PM can
+# read its dependency declaration at admission time.
+#
+# It is deliberately a SUBDIRECTORY rather than flattened to the repo root: a
+# flat layout puts __init__.py at the root, which makes pytest treat the whole
+# repository as a package and fail to collect the tests with "attempted
+# relative import with no known parent package". The nested form keeps both
+# `hermes plugins install` and `pytest` happy.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -71,9 +71,28 @@ class TestSegments:
         assert "tps" in segs
         assert "cache" in segs
         assert "context" in segs
-        assert "model" in segs
+        # Off by default: they cost status length, so the headline three own it.
+        assert "model" not in segs
+        assert "tool" not in segs
         assert "latency" not in segs   # opt-in
         assert "totals" not in segs    # opt-in
+
+    def test_opt_in_segments_appear_when_switched_on(self):
+        snap = collector_with(cache_read=400).snapshot()
+        cfg = PresenceConfig(show_model=True, show_latency=True, show_totals=True)
+        segs = dict(segments(snap, cfg))
+        assert "model" in segs
+        assert "latency" in segs
+        assert "totals" in segs
+
+    def test_default_presence_is_the_three_headline_metrics(self):
+        """Out of the box the status shows exactly throughput, cache and context."""
+        snap = collector_with(cache_read=400).snapshot()
+        text = compact_status(snap, PresenceConfig(mode="compact"))
+        assert "tok/s" in text
+        assert "cache" in text
+        assert "ctx" in text
+        assert "gpt-5.6" not in text
 
     def test_toggles_remove_segments(self):
         snap = collector_with().snapshot()
@@ -91,10 +110,12 @@ class TestSegments:
         assert [key for key, _ in segments(snap, cfg)] == ["context"]
 
     def test_tool_segment_appears_only_while_running(self):
+        # Opt-in, so the config has to ask for it explicitly.
+        cfg = PresenceConfig(show_tool=True)
         c = collector_with()
-        assert "tool" not in dict(segments(c.snapshot(), PresenceConfig()))
+        assert "tool" not in dict(segments(c.snapshot(), cfg))
         c.on_pre_tool_call(tool_name="terminal", args={})
-        assert "⧉ terminal" in dict(segments(c.snapshot(), PresenceConfig()))["tool"]
+        assert "⧉ terminal" in dict(segments(c.snapshot(), cfg))["tool"]
 
     def test_no_data_hides_the_segment(self):
         """An idle bot must not render '⚡ -- tok/s' on repeat."""
@@ -103,14 +124,15 @@ class TestSegments:
 
     def test_model_is_shortened_to_the_last_path_segment(self):
         snap = collector_with().snapshot()
-        assert "gpt-5.6" in dict(segments(snap, PresenceConfig()))["model"]
-        assert "openai/" not in dict(segments(snap, PresenceConfig()))["model"]
+        seg = dict(segments(snap, PresenceConfig(show_model=True)))["model"]
+        assert "gpt-5.6" in seg
+        assert "openai/" not in seg
 
     def test_long_model_name_truncated(self):
         c = MetricsCollector()
         c.on_post_api_request(model="vendor/" + "x" * 40, api_duration=1.0,
                               usage={"output_tokens": 1, "prompt_tokens": 1})
-        model_seg = dict(segments(c.snapshot(), PresenceConfig()))["model"]
+        model_seg = dict(segments(c.snapshot(), PresenceConfig(show_model=True)))["model"]
         assert model_seg.endswith("...")
         assert len(model_seg) <= 30
 

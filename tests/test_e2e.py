@@ -177,14 +177,20 @@ class TestRenderedPresence:
     def test_rotate_mode_cycles_every_segment(self, loaded_plugin):
         _fire_one_turn(loaded_plugin)
         snap = loaded_plugin.get_collector().snapshot()
-        config = loaded_plugin.get_config()
         render = importlib.import_module(f"{loaded_plugin.__name__}.render")
 
-        lines = [render.render_status(snap, config, turn) for turn in range(5)]
+        # The default presence carries the three headline metrics; the tool and
+        # model segments are opt-in, so switch them on to see all five rotate.
+        config_mod = importlib.import_module(f"{loaded_plugin.__name__}.config")
+        full = config_mod.PresenceConfig(
+            mode="rotate", show_tool=True, show_model=True, show_latency=True,
+        )
+        lines = [render.render_status(snap, full, turn) for turn in range(6)]
         assert any("tok/s" in ln for ln in lines)
         assert any("cache" in ln for ln in lines)
         assert any("ctx" in ln for ln in lines)
         assert any("terminal" in ln for ln in lines)
+        assert any("gpt-5.6" in ln for ln in lines)
         assert len(set(lines)) > 1, "rotate mode did not actually rotate"
 
     def test_every_rendered_line_fits_discords_limit(self, loaded_plugin):

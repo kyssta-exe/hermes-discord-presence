@@ -8,11 +8,11 @@ homepage: https://github.com/kyssta-exe/hermes-discord-presence
 author: kyssta
 description: >
   Publishes live Hermes agent telemetry as the Discord bot's presence —
-  tokens per second, prompt-cache hit rate, context-window occupancy, and the
-  tool currently running, the same numbers the desktop app's bottom status bar
-  shows. Adds a /pulse slash command, an agent_pulse tool, and a
-  `hermes discord-presence` CLI command. Observer-only: no prompt rewriting,
-  no tool overrides, no core changes.
+  tokens per second, prompt-cache hit rate, context-window occupancy, and
+  optionally the tool currently running and the active model: the same
+  numbers the desktop app's bottom status bar shows. Adds a /pulse slash
+  command, an agent_pulse tool, and a `hermes discord-presence` CLI command.
+  Observer-only: no prompt rewriting, no tool overrides, no core changes.
 tags: [gateway, discord, observability, metrics, presence, status]
 
 provides_tools:
@@ -92,14 +92,14 @@ config_schema:
     description: Draw the block-character context bar beside the percentage
   show_tool:
     type: bool
-    default: true
+    default: false
     label: Running tool
-    description: Show the tool the agent is executing right now
+    description: Show the tool the agent is executing right now. Off by default — it costs status length.
   show_model:
     type: bool
-    default: true
+    default: false
     label: Model
-    description: Show the active model
+    description: Show the active model. Off by default — it costs status length.
   show_latency:
     type: bool
     default: false

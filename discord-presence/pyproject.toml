@@ -31,5 +31,22 @@ build-backend = "setuptools.build_meta"
 # This pyproject declares the plugin's Python requirements for PM admission when
 # a user installs it with `hermes plugins install`. It is NOT a buildable wheel:
 # a Hermes directory plugin is loaded from the directory as-is (plugin.yaml plus
-# sibling modules), so the package layout is deliberately left unset and the
-# test/lint config lives in the repository root's pyproject.toml instead.
+# sibling modules), so the package layout is deliberately left unset.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# The plugin ships flat, so __init__.py sits at the repository root. Without
+# these two, pytest treats that root as a package and calls Package.setup() on
+# the plugin modules themselves, where `from . import metrics` has no parent
+# package. importlib mode derives module names from the path instead of walking
+# packages; namespace packages stop the rootdir being claimed as one.
+importmode = "importlib"
+consider_namespace_packages = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]

@@ -21,10 +21,15 @@ status bar into a Discord bot presence, plus two on-demand read surfaces.
 | ⚡ | Tokens/sec | `sum(output tokens) / sum(request durations)` over a 12-request rolling window — true throughput, not a mean of per-request ratios |
 | ◎ | Cache hit rate | `cache_read / prompt`, where `prompt = input + cache_read + cache_write` |
 | ▰▰▱▱ | Context usage | last request's `prompt_tokens` / the model's context length, with a block bar |
-| ⧉ | Running tool | the tool currently executing, from `pre_tool_call` |
-| ☤ | Model | the active route, last path segment only |
+| ⧉ | Running tool | the tool currently executing, from `pre_tool_call` — **off by default** |
+| ☤ | Model | the active route, last path segment only — **off by default** |
 | ◷ | Latency | mean request duration over the window (opt-in) |
 | Σ | Lifetime tokens | session total (opt-in) |
+
+The first three metrics ship enabled; the rest are one switch each. Discord caps
+a custom status at 128 characters, so every extra segment competes with the ones
+the user actually asked for — when suggesting one, check the rendered length in
+`compact` mode first.
 
 Presence **status dot** follows the same ladder as the status bar:
 

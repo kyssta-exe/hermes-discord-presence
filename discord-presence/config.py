@@ -68,8 +68,11 @@ class PresenceConfig:
     show_cache_hit: bool = True
     show_context: bool = True
     show_context_bar: bool = True
-    show_tool: bool = True
-    show_model: bool = True
+    # Off by default: both are useful context but they eat the 128-character
+    # budget that tokens/sec, cache hit and context occupancy actually need.
+    # Anyone who wants them flips one switch.
+    show_tool: bool = False
+    show_model: bool = False
     show_latency: bool = False
     show_totals: bool = False
 
@@ -114,8 +117,8 @@ class PresenceConfig:
             show_cache_hit=_bool(cfg("show_cache_hit", True), True),
             show_context=_bool(cfg("show_context", True), True),
             show_context_bar=_bool(cfg("show_context_bar", True), True),
-            show_tool=_bool(cfg("show_tool", True), True),
-            show_model=_bool(cfg("show_model", True), True),
+            show_tool=_bool(cfg("show_tool", False), False),
+            show_model=_bool(cfg("show_model", False), False),
             show_latency=_bool(cfg("show_latency", False), False),
             show_totals=_bool(cfg("show_totals", False), False),
             bar_width=bar_width,
@@ -151,8 +154,14 @@ CONFIG_SCHEMA: dict = {
     },
     "show_context": {"type": "bool", "default": True, "description": "Show context usage"},
     "show_context_bar": {"type": "bool", "default": True, "description": "Draw the context bar"},
-    "show_tool": {"type": "bool", "default": True, "description": "Show the running tool"},
-    "show_model": {"type": "bool", "default": True, "description": "Show the active model"},
+    "show_tool": {
+        "type": "bool", "default": False,
+        "description": "Show the running tool (off by default — it costs status length)",
+    },
+    "show_model": {
+        "type": "bool", "default": False,
+        "description": "Show the active model (off by default — it costs status length)",
+    },
     "show_latency": {"type": "bool", "default": False, "description": "Show mean request latency"},
     "show_totals": {"type": "bool", "default": False, "description": "Show lifetime token totals"},
     "bar_width": {"type": "int", "default": 10, "description": "Context bar cells (3-20)"},

@@ -8,8 +8,14 @@ in the server without anyone having to ask.
 📊 ⚡ 96 tok/s          ← throughput, windowed
 📊 ◎ 79% cache         ← prompt-cache hit rate
 📊 ▰▰▱▱▱▱▱▱▱▱ · 2% ctx · 4.2K/200.0K
-📊 ⧉ terminal          ← the tool running right now
-📊 ☤ gpt-5.6           ← active model
+```
+
+Out of the box the status carries the three headline metrics. The running tool
+and the active model are one switch each — useful, but they cost status length,
+so they stay off until you ask:
+
+```
+📊 ⚡ 96 tok/s · ◎ 79% cache · ▰▰▱▱▱▱▱▱▱▱ · 2% ctx · ⧉ terminal · ☤ gpt-5.6
 ```
 
 ## Install
@@ -43,15 +49,19 @@ have nowhere to show a status.
 
 ### The metrics
 
-| Glyph | Metric | Definition |
-|---|---|---|
-| ⚡ | Tokens/sec | `sum(output tokens) / sum(request durations)` over a 12-request rolling window — true throughput, not a mean of per-request ratios |
-| ◎ | Cache hit rate | `cache_read / prompt`, where `prompt = input + cache_read + cache_write` |
-| ▰▱ | Context usage | last request's `prompt_tokens` ÷ the model's context length, with a block bar |
-| ⧉ | Running tool | the tool executing right now |
-| ☤ | Model | active route, last path segment only |
-| ◷ | Latency | mean request duration (opt-in) |
-| Σ | Lifetime tokens | session total (opt-in) |
+| Glyph | Metric | Definition | Default |
+|---|---|---|---|
+| ⚡ | Tokens/sec | `sum(output tokens) / sum(request durations)` over a 12-request rolling window — true throughput, not a mean of per-request ratios | **on** |
+| ◎ | Cache hit rate | `cache_read / prompt`, where `prompt = input + cache_read + cache_write` | **on** |
+| ▰▱ | Context usage | last request's `prompt_tokens` ÷ the model's context length, with a block bar | **on** |
+| ⧉ | Running tool | the tool executing right now | off |
+| ☤ | Model | active route, last path segment only | off |
+| ◷ | Latency | mean request duration | off |
+| Σ | Lifetime tokens | session total | off |
+
+Discord caps a custom status at 128 characters, so every extra segment competes
+with the ones you actually asked for. The three defaults fit comfortably; turn
+the rest on one at a time, and watch the length if you use `compact` mode.
 
 All of it comes from documented plugin hooks — `post_api_request`,
 `pre_tool_call`, `pre_llm_call`. No core internals, no monkey-patching, no
@@ -98,8 +108,8 @@ plugins:
 | `show_cache_hit` | bool | `true` | |
 | `show_context` | bool | `true` | |
 | `show_context_bar` | bool | `true` | |
-| `show_tool` | bool | `true` | |
-| `show_model` | bool | `true` | |
+| `show_tool` | bool | `false` | Running tool (off — costs status length) |
+| `show_model` | bool | `false` | Active model (off — costs status length) |
 | `show_latency` | bool | `false` | |
 | `show_totals` | bool | `false` | |
 | `bar_width` | int | `10` | Context bar cells (3–20) |
