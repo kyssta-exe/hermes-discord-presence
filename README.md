@@ -4,18 +4,26 @@ Publishes live Hermes agent telemetry as your **Discord bot's presence** — the
 same numbers the desktop app shows in its bottom status bar, visible to everyone
 in the server without anyone having to ask.
 
-```
-📊 ⚡ 96 tok/s          ← throughput, windowed
-📊 ◎ 79% cache         ← prompt-cache hit rate
-📊 ▰▰▱▱▱▱▱▱▱▱ · 2% ctx · 4.2K/200.0K
-```
+## What it looks like
 
-Out of the box the status carries the three headline metrics. The running tool
-and the active model are one switch each — useful, but they cost status length,
-so they stay off until you ask:
+Real captures of the status rotating through its metrics (Custom Status, green
+presence dot while the agent works):
+
+| State | Screenshot | Config |
+|---|---|---|
+| Thinking — a request is in flight | ![thinking](docs/examples/thinking.png) | default |
+| Throughput | ![tokens per second](docs/examples/tokens-per-second.png) | `show_tokens_per_second` (default on) |
+| Cache hit rate | ![cache hit](docs/examples/cache-hit.png) | `show_cache_hit` (default on) |
+| Active model | ![model](docs/examples/model.png) | `show_model` (opt-in) |
+
+Out of the box the status carries the three headline metrics — tokens/sec,
+cache hit, and context occupancy. The running tool and the active model are one
+switch each: useful, but they cost status length (Discord caps a Custom Status at
+128 characters), so they stay off until you ask. Every enabled segment cycles one
+per update in `rotate` mode, or joins onto one line in `compact` mode:
 
 ```
-📊 ⚡ 96 tok/s · ◎ 79% cache · ▰▰▱▱▱▱▱▱▱▱ · 2% ctx · ⧉ terminal · ☤ gpt-5.6
+📊 ⚡ 96 tok/s · ◎ 79% cache · ▰▰▱▱▱▱▱▱▱▰ · 2% ctx · ⧉ terminal · ☤ gpt-5.6
 ```
 
 ## Install
@@ -46,6 +54,44 @@ have nowhere to show a status.
 | **`/pulse`** | Formatted telemetry report in any gateway session (Discord, Telegram, CLI) |
 | **`agent_pulse` tool** | The model can report its own performance when you ask "how fast are you going?" |
 | **`hermes discord-presence`** | `status` / `json` / `config` / `reset` from a shell |
+
+### The four states, annotated
+
+A rotation cycle, captured live from the member list:
+
+**Thinking** — `📊 thinking...`
+
+![thinking](docs/examples/thinking.png)
+
+Shown the moment a provider request starts, before any usage numbers have come
+back. It outranks the metrics on purpose: "I'm working" is more useful than a
+stale throughput figure, and it means a bot is never silently blank mid-turn.
+The green dot on the avatar is the **online** presence status.
+
+**Throughput** — `📊 ⚡ 42 tok/s`
+
+![tokens per second](docs/examples/tokens-per-second.png)
+
+The ⚡ segment. `sum(output tokens) / sum(request durations)` over the last 12
+requests — true throughput, not a mean of per-request ratios, which is why a
+single slow request doesn't tank the number.
+
+**Cache hit** — `📊 ◎ 100% cache`
+
+![cache hit](docs/examples/cache-hit.png)
+
+The ◎ segment: `cache_read / prompt`, where `prompt = input + cache_read +
+cache_write`. 100% means the whole prompt prefix was reused — input cost is at
+its floor. If the window has zero cache reads this segment is **hidden**, not
+shown as 0%, because no data is not the same thing as a bad cache.
+
+**Active model** — `📊 step-5-preview:free`
+
+![model](docs/examples/model.png)
+
+The ☤ segment (`show_model`, opt-in): the last path segment of the active route,
+so `openai/gpt-5.6` shows as `gpt-5.6`. Useful when a session can fall back
+between models and you want to see which one actually answered.
 
 ### The metrics
 
