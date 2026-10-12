@@ -10,6 +10,7 @@ from discord_presence.render import (
     presence_status,
     render_report,
     render_status,
+    render_statuses,
     rotate_status,
     segments,
 )
@@ -190,6 +191,138 @@ class TestRenderStatus:
         assert " | " in compact_status(snap, cfg)
 
 
+class TestFullMode:
+    """``mode: full`` — every metric at once, with labels that fit."""
+
+    def test_full_is_one_of_the_modes(self):
+        from discord_presence.config import MODES
+
+        assert "full" in MODES
+
+    def test_full_turns_every_metric_on(self):
+        """The individual show_* switches are ignored — that is the point."""
+
+        class Ctx:
+            def get_config(self, key, default=None):
+                return {
+                    "mode": "full", "show_tool": False, "show_model": False,
+                    "show_totals": False, "show_latency": False,
+                }.get(key, default)
+
+        cfg = PresenceConfig.from_ctx(Ctx())
+        for key in (
+            "show_tokens_per_second", "show_cache_hit", "show_context",
+            "show_tool", "show_model", "show_latency", "show_totals",
+        ):
+            assert getattr(cfg, key) is True, key
+
+    def test_full_uses_short_labels(self):
+        snap = collector_with(cache_read=400).snapshot()
+        text = compact_status(snap, PresenceConfig(mode="full"))
+        assert "/s" in text
+        assert "tok/s" not in text        # the lean spelling replaces it
+
+    def test_full_renders_every_segment_at_once(self):
+        c = collector_with(cache_read=400)
+        c.on_pre_tool_call(tool_name="terminal", args={})
+        keys = [
+            key
+            for key, _ in segments(c.snapshot(), PresenceConfig(mode="full"), lean=True)
+        ]
+        assert keys == ["tps", "cache", "context", "tool", "latency", "model", "totals"]
+
+    def test_full_line_still_fits_discord(self):
+        c = collector_with(cache_read=400)
+        c.on_pre_tool_call(tool_name="a-fairly-long-tool-name", args={})
+        text = compact_status(c.snapshot(), PresenceConfig(mode="full"))
+        assert len(text) <= 128
+
+    def test_lean_spelling_does_not_leak_into_the_other_modes(self):
+        snap = collector_with(cache_read=400).snapshot()
+        assert "tok/s" in compact_status(snap, PresenceConfig(mode="compact"))
+
+
+class TestDualActivity:
+    """``activity_type: both`` — the custom status plus a named activity line."""
+
+    def test_second_line_exists_and_never_duplicates_line_one(self):
+        snap = collector_with(cache_read=400).snapshot()
+        cfg = PresenceConfig(mode="rotate", activity_type="both")
+        for turn in range(3):
+            line1, line2 = render_statuses(snap, cfg, turn)
+            assert line2, "the activity line should carry the leftover metrics"
+            combined = f"{line1} {line2}"
+            for needle in ("tok/s", "cache", "ctx"):
+                assert combined.count(needle) == 1
+
+    def test_every_metric_is_visible_across_the_two_lines(self):
+        c = collector_with(cache_read=400)
+        c.on_pre_tool_call(tool_name="terminal", args={})
+        cfg = PresenceConfig(mode="full", activity_type="both")
+        line1, line2 = render_statuses(c.snapshot(), cfg, 0)
+        combined = f"{line1} {line2}"
+        assert "/s" in combined          # throughput
+        assert "%" in combined           # cache + context
+        assert "terminal" in combined    # running tool
+        assert "gpt-5.6" in combined     # model
+        assert "Σ" in combined           # lifetime tokens
+        assert "◷" in combined           # latency
+
+    def test_compact_dual_splits_instead_of_cramming(self):
+        snap = collector_with(cache_read=400).snapshot()
+        cfg = PresenceConfig(mode="compact", activity_type="both")
+        line1, line2 = render_statuses(snap, cfg, 0)
+        assert line2
+        assert len(line1) <= 128 and len(line2) <= 128
+        # Neither line is empty, and line one is genuinely shorter than the
+        # single-line render — the split happened instead of a trim.
+        assert line1 != compact_status(snap, cfg)
+        assert len(line1) < len(compact_status(snap, cfg))
+
+    def test_second_line_is_none_when_there_is_nothing_left_for_it(self):
+        snap = collector_with().snapshot()
+        cfg = PresenceConfig(
+            show_tokens_per_second=False, show_cache_hit=False, activity_type="both",
+        )
+        line1, line2 = render_statuses(snap, cfg, 0)
+        assert line2 is None
+        assert "ctx" in line1
+
+    def test_thinking_owns_line_one_and_the_metrics_move_to_line_two(self):
+        c = collector_with()
+        c.on_pre_api_request(session_id="s1", model="m")
+        line1, line2 = render_statuses(
+            c.snapshot(), PresenceConfig(mode="rotate", activity_type="both"), 0
+        )
+        assert "thinking" in line1
+        assert line2 and "tok/s" in line2
+
+    def test_both_lines_change_as_the_rotation_turns(self):
+        snap = collector_with(cache_read=400).snapshot()
+        cfg = PresenceConfig(mode="rotate", activity_type="both")
+        assert len({render_statuses(snap, cfg, turn) for turn in range(3)}) > 1
+
+    def test_dual_lines_never_exceed_discords_cap(self):
+        c = collector_with(cache_read=400)
+        c.on_pre_tool_call(tool_name="x" * 60, args={})
+        cfg = PresenceConfig(mode="full", activity_type="both", separator=" · ")
+        line1, line2 = render_statuses(c.snapshot(), cfg, 0)
+        assert len(line1) <= 128
+        assert line2 is None or len(line2) <= 128
+
+    def test_idle_dual_session_shows_the_idle_text_and_no_second_line(self):
+        line1, line2 = render_statuses(
+            MetricsCollector().snapshot(), PresenceConfig(activity_type="both"), 0
+        )
+        assert "idle" in line1
+        assert line2 is None
+
+    def test_single_kind_settings_never_use_a_second_line(self):
+        snap = collector_with(cache_read=400).snapshot()
+        for kind in ("custom", "playing", "watching", "listening", "competing", "streaming"):
+            assert render_statuses(snap, PresenceConfig(activity_type=kind), 0)[1] is None
+
+
 class TestPresenceStatus:
     def test_online_while_working(self):
         c = collector_with()
@@ -298,6 +431,37 @@ class TestConfig:
         cfg = PresenceConfig.from_ctx(Ctx())
         assert cfg.mode == "rotate"
         assert cfg.activity_type == "custom"
+
+    def test_new_activity_keys_default_and_coerce(self):
+        class Ctx:
+            def get_config(self, key, default=None):
+                return {
+                    "activity_type": "BOTH",
+                    "activity_kind": "Listening",
+                    "activity_url": "  https://example.com/status  ",
+                }.get(key, default)
+
+        cfg = PresenceConfig.from_ctx(Ctx())
+        assert cfg.activity_type == "both"
+        assert cfg.activity_kind == "listening"
+        assert cfg.activity_url == "https://example.com/status"
+        assert cfg.dual is True
+
+    def test_activity_kind_rejects_custom_and_both(self):
+        class Ctx:
+            def get_config(self, key, default=None):
+                return {"activity_kind": "both"}.get(key, default)
+
+        assert PresenceConfig.from_ctx(Ctx()).activity_kind == "watching"
+
+    def test_activity_url_must_be_http(self):
+        """Discord rejects a streaming activity carrying a junk URL."""
+
+        class Ctx:
+            def get_config(self, key, default=None):
+                return {"activity_url": "ftp://nope"}.get(key, default)
+
+        assert PresenceConfig.from_ctx(Ctx()).activity_url == ""
 
     def test_garbage_types_do_not_raise(self):
         class Ctx:

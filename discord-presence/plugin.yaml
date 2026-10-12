@@ -1,6 +1,6 @@
 name: discord-presence
 label: Discord Presence
-version: 1.0.0
+version: 1.1.0
 manifest_version: 2
 api_version: 1
 license: MIT
@@ -10,8 +10,10 @@ description: >
   Publishes live Hermes agent telemetry as the Discord bot's presence —
   tokens per second, prompt-cache hit rate, context-window occupancy, and
   optionally the tool currently running and the active model: the same
-  numbers the desktop app's bottom status bar shows. Adds a /pulse slash
-  command, an agent_pulse tool, and a `hermes discord-presence` CLI command.
+  numbers the desktop app's bottom status bar shows. Can publish on both
+  Discord lines at once (custom status + a Watching/Playing activity), so
+  every metric is visible together. Adds a /pulse slash command, an
+  agent_pulse tool, and a `hermes discord-presence` CLI command.
   Observer-only: no prompt rewriting, no tool overrides, no core changes.
 tags: [gateway, discord, observability, metrics, presence, status]
 
@@ -40,16 +42,31 @@ config_schema:
     description: Publish agent telemetry as the Discord bot presence
   mode:
     type: str
-    choices: [rotate, compact]
+    choices: [rotate, compact, full]
     default: rotate
     label: Layout
-    description: rotate = one metric per update; compact = every metric joined on one line
+    description: rotate = one metric per update; compact = every metric joined on one line; full = every metric at once with short labels
   activity_type:
     type: str
-    choices: [custom, playing, watching, listening, competing]
+    choices: [custom, playing, watching, listening, competing, streaming, both]
     default: custom
     label: Activity type
-    description: Discord activity kind — custom status, or Playing/Watching/Listening/Competing
+    description: >-
+      custom = custom status; playing/watching/listening/competing = a named
+      activity; streaming = "Streaming ..." with a link (needs Activity URL);
+      both = a custom status AND a named activity at once, so the metrics split
+      across Discord's two lines and everything shows at the same time
+  activity_kind:
+    type: str
+    choices: [playing, watching, listening, competing, streaming]
+    default: watching
+    label: Named activity kind
+    description: Which named activity the second line uses when Activity type is "both"
+  activity_url:
+    type: str
+    default: ""
+    label: Activity URL
+    description: Link used by a streaming activity (Discord requires one); ignored otherwise
   update_interval_seconds:
     type: int
     default: 20

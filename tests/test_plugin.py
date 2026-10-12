@@ -17,6 +17,7 @@ import discord_presence
 import pytest
 import yaml
 from discord_presence import presence, pulse_tool, schemas
+from discord_presence.config import PresenceConfig
 
 
 def _manifest():
@@ -381,3 +382,214 @@ class TestPresencePublisher:
         presence.wire(bot, None, discord_presence.get_collector(), discord_presence.get_config())
         presence.stop_all()
         assert presence.active_publishers() == 0
+
+
+class TestActivityObjects:
+    """The two-line publish path, against the real discord.py activity objects."""
+
+    def test_custom_kind_builds_a_custom_status(self):
+        discord = pytest.importorskip("discord")
+        cfg = PresenceConfig(activity_type="custom")
+        status = presence._activity(discord, cfg, "📊 ⚡ 96 tok/s")
+        assert isinstance(status, discord.CustomActivity)
+
+    def test_named_kind_carries_its_type_and_text(self):
+        discord = pytest.importorskip("discord")
+        act = presence._activity(discord, PresenceConfig(activity_type="watching"), "⚡ 96 tok/s")
+        assert act.type is discord.ActivityType.watching
+        assert act.name == "⚡ 96 tok/s"
+
+    def test_both_publishes_a_custom_status_and_a_named_activity(self):
+        discord = pytest.importorskip("discord")
+        cfg = PresenceConfig(activity_type="both", activity_kind="listening")
+        acts = presence._activities(discord, cfg, "📊 ⚡ 96 tok/s", "◎ 79% cache")
+        assert len(acts) == 2
+        assert isinstance(acts[0], discord.CustomActivity)
+        assert acts[1].type is discord.ActivityType.listening
+        assert acts[1].name == "◎ 79% cache"
+
+    def test_both_with_an_empty_second_line_publishes_one_activity(self):
+        discord = pytest.importorskip("discord")
+        acts = presence._activities(discord, PresenceConfig(activity_type="both"), "📊 idle", None)
+        assert len(acts) == 1
+        assert isinstance(acts[0], discord.CustomActivity)
+
+    def test_streaming_uses_the_configured_url(self):
+        discord = pytest.importorskip("discord")
+        cfg = PresenceConfig(activity_type="streaming", activity_url="https://example.com/live")
+        act = presence._activity(discord, cfg, "⚡ 96 tok/s")
+        assert act.type is discord.ActivityType.streaming
+        assert act.url == "https://example.com/live"
+
+    def test_streaming_without_a_url_degrades_to_playing(self):
+        """Discord rejects a streaming activity with no link — never send one."""
+        discord = pytest.importorskip("discord")
+        act = presence._activity(discord, PresenceConfig(activity_type="streaming"), "x")
+        assert act.type is discord.ActivityType.playing
+
+    def test_dual_line_kinds_may_stream_too(self):
+        discord = pytest.importorskip("discord")
+        cfg = PresenceConfig(
+            activity_type="both", activity_kind="streaming",
+            activity_url="https://example.com/live",
+        )
+        acts = presence._activities(discord, cfg, "📊 ⚡ 96 tok/s", "◎ 79% cache")
+        assert acts[1].type is discord.ActivityType.streaming
+
+
+class TestPublisherTick:
+    """One polling tick of the real publisher against a fake client."""
+
+    @staticmethod
+    def _bot(calls, raw=None):
+        """A fake client with the two routes the publisher may use.
+
+        ``raw`` collects the op-3 gateway payloads (the dual-line route),
+        ``calls`` collects ``change_presence`` calls (single line).
+        """
+
+        class FakeSocket:
+            async def send(self, data):
+                if raw is not None:
+                    raw.append(data)
+
+        class FakeBot:
+            loop = None
+
+            def __init__(self):
+                self.ws = FakeSocket() if raw is not None else None
+
+            async def change_presence(self, **kwargs):
+                calls.append(kwargs)
+
+            def is_closed(self):
+                return False
+
+        return FakeBot()
+
+    @staticmethod
+    def _collector():
+        """A collector holding one realistic completed request."""
+        collector = discord_presence.get_collector()
+        collector.on_post_api_request(
+            session_id="s", model="openai/gpt-5.6", provider="openai", platform="discord",
+            api_duration=2.5,
+            usage={"input_tokens": 900, "output_tokens": 240, "cache_read_tokens": 3300,
+                   "prompt_tokens": 4200, "total_tokens": 4440},
+            context_length=200_000,
+        )
+        collector.on_pre_tool_call(tool_name="terminal", args={})
+        return collector
+
+    def test_dual_mode_sends_two_activities_in_one_gateway_payload(self):
+        """discord.py cannot express two activities, so the op-3 payload is raw."""
+        import asyncio
+
+        pytest.importorskip("discord")
+        calls, raw = [], []
+        cfg = PresenceConfig(mode="full", activity_type="both")
+        publisher = presence.PresencePublisher(self._bot(calls, raw), self._collector(), cfg)
+        asyncio.run(publisher._publish_once())
+
+        assert calls == [], "the dual line must not be sent as one activity"
+        assert len(raw) == 1
+        payload = json.loads(raw[0])
+        assert payload["op"] == 3
+        assert payload["d"]["status"] == "online"
+        activities = payload["d"]["activities"]
+        assert len(activities) == 2
+        assert activities[0]["type"] == 4                       # custom status
+        assert activities[0]["state"].startswith("📊")
+        assert activities[1]["type"] == 3                       # "Watching …"
+        assert len(str(activities[0]["state"])) <= 128
+        assert len(activities[1]["name"]) <= 128
+        combined = f"{activities[0]['state']} {activities[1]['name']}"
+        for needle in ("/s", "%", "terminal", "gpt-5.6"):
+            assert needle in combined
+
+    def test_dual_mode_degrades_to_one_line_without_a_socket(self):
+        import asyncio
+
+        pytest.importorskip("discord")
+        import discord
+
+        calls = []
+        cfg = PresenceConfig(mode="full", activity_type="both")
+        publisher = presence.PresencePublisher(self._bot(calls), self._collector(), cfg)
+        asyncio.run(publisher._publish_once())
+        assert len(calls) == 1
+        assert isinstance(calls[0]["activity"], discord.CustomActivity)
+
+    def test_single_kind_still_uses_change_presence(self):
+        import asyncio
+
+        pytest.importorskip("discord")
+        calls, raw = [], []
+        cfg = PresenceConfig(activity_type="watching")
+        publisher = presence.PresencePublisher(self._bot(calls, raw), self._collector(), cfg)
+        asyncio.run(publisher._publish_once())
+        assert raw == []
+        assert len(calls) == 1
+        assert getattr(calls[0]["status"], "name", calls[0]["status"]) == "online"
+        assert "tok/s" in calls[0]["activity"].name
+
+    def test_unchanged_renders_skip_the_rest_call(self):
+        import asyncio
+
+        pytest.importorskip("discord")
+        calls = []
+        collector = discord_presence.get_collector()
+        collector.on_post_api_request(
+            session_id="s", model="openai/gpt-5.6", api_duration=1.0,
+            usage={"input_tokens": 100, "output_tokens": 100, "prompt_tokens": 200,
+                   "total_tokens": 300},
+            context_length=1000,
+        )
+        # One metric only: the dual renderer has nothing for a second line, so
+        # both ticks render identically and the second must not hit Discord.
+        cfg = PresenceConfig(
+            mode="compact", activity_type="both", show_tokens_per_second=False,
+            show_context=False,
+        )
+        publisher = presence.PresencePublisher(self._bot(calls), collector, cfg)
+        asyncio.run(publisher._publish_once())
+        asyncio.run(publisher._publish_once())
+        assert len(calls) == 1
+
+    def test_change_in_the_second_line_triggers_an_update(self):
+        import asyncio
+
+        pytest.importorskip("discord")
+        raw = []
+        cfg = PresenceConfig(mode="rotate", activity_type="both")
+        publisher = presence.PresencePublisher(self._bot([], raw), self._collector(), cfg)
+        asyncio.run(publisher._publish_once())
+        asyncio.run(publisher._publish_once())
+        # The rotation moves a metric between the two lines every tick, so the
+        # second line alone is enough to justify the update.
+        assert len(raw) == 2
+        first = json.loads(raw[0])["d"]["activities"]
+        second = json.loads(raw[1])["d"]["activities"]
+        assert [a["state"] for a in first if "state" in a] != [
+            a["state"] for a in second if "state" in a
+        ] or [a["name"] for a in first] != [a["name"] for a in second]
+
+    def test_closed_client_ends_the_loop_instead_of_raising(self):
+        import asyncio
+
+        pytest.importorskip("discord")
+        calls = []
+
+        class ClosedBot:
+            loop = None
+
+            async def change_presence(self, **kwargs):
+                calls.append(kwargs)
+
+            def is_closed(self):
+                return True
+
+        publisher = presence.PresencePublisher(ClosedBot(), self._collector(), PresenceConfig())
+        asyncio.run(publisher._publish_once())
+        assert calls == []
+        assert publisher._stopped.is_set()

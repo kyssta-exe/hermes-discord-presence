@@ -14,11 +14,15 @@ from typing import Any
 
 PLUGIN_ID = "discord-presence"
 
-MODES = ("rotate", "compact")
-ACTIVITY_TYPES = ("custom", "playing", "watching", "listening", "competing")
+MODES = ("rotate", "compact", "full")
+ACTIVITY_TYPES = ("custom", "playing", "watching", "listening", "competing", "streaming", "both")
+# Kinds that may carry a name ("Watching …"). "custom" is the status line and
+# "both" is a combination, so neither belongs here.
+ACTIVITY_KINDS = ("playing", "watching", "listening", "competing", "streaming")
 
 _DEFAULT_MODE = "rotate"
 _DEFAULT_ACTIVITY = "custom"
+_DEFAULT_ACTIVITY_KIND = "watching"
 _DEFAULT_INTERVAL = 20
 _DEFAULT_EMOJI = "📊"
 
@@ -57,8 +61,12 @@ class PresenceConfig:
     """Everything the publisher needs, already validated."""
 
     enabled: bool = True
-    mode: str = _DEFAULT_MODE                 # rotate | compact
-    activity_type: str = _DEFAULT_ACTIVITY    # custom | playing | watching | ...
+    mode: str = _DEFAULT_MODE                 # rotate | compact | full
+    activity_type: str = _DEFAULT_ACTIVITY    # custom | playing | ... | both
+    # The kind used for the named line when ``activity_type: both``.
+    activity_kind: str = _DEFAULT_ACTIVITY_KIND
+    # Discord only accepts a *streaming* activity that carries a URL.
+    activity_url: str = ""
     update_interval_seconds: int = _DEFAULT_INTERVAL
     status_emoji: str = _DEFAULT_EMOJI
     idle_after_seconds: int = 180
@@ -82,6 +90,31 @@ class PresenceConfig:
     empty: str = "▱"
     separator: str = " · "
 
+    @property
+    def lean(self) -> bool:
+        """``mode: full`` renders short labels so every metric fits."""
+        return self.mode == "full"
+
+    @property
+    def dual(self) -> bool:
+        """Whether a second presence line (a named activity) is published."""
+        return self.activity_type == "both"
+
+    def __post_init__(self) -> None:
+        """``mode: full`` always means every metric on.
+
+        Enforced here rather than only in :meth:`from_ctx` so a config built by
+        hand (tests, the tool, a reloaded preset) behaves the same as one read
+        out of ``config.yaml``.
+        """
+        if self.mode != "full":
+            return
+        for key in (
+            "show_tokens_per_second", "show_cache_hit", "show_context",
+            "show_tool", "show_model", "show_latency", "show_totals",
+        ):
+            object.__setattr__(self, key, True)
+
     @classmethod
     def from_ctx(cls, ctx: Any) -> PresenceConfig:
         """Build from a live ``PluginContext`` (defaults for anything unset)."""
@@ -103,12 +136,23 @@ class PresenceConfig:
         warn = _int(cfg("context_warn_percent", 80), 80, 10, 100)
         bar_width = _int(cfg("bar_width", 10), 10, 3, 20)
 
+        mode = _choice(cfg("mode", _DEFAULT_MODE), MODES, _DEFAULT_MODE)
+
+        url = str(cfg("activity_url", "") or "").strip()[:256]
+        if url and not url.startswith(("http://", "https://")):
+            url = ""       # Discord rejects a streaming activity with a bad URL
+
         return cls(
             enabled=_bool(cfg("enabled", True), True),
-            mode=_choice(cfg("mode", _DEFAULT_MODE), MODES, _DEFAULT_MODE),
+            mode=mode,
             activity_type=_choice(
                 cfg("activity_type", _DEFAULT_ACTIVITY), ACTIVITY_TYPES, _DEFAULT_ACTIVITY
             ),
+            activity_kind=_choice(
+                cfg("activity_kind", _DEFAULT_ACTIVITY_KIND),
+                ACTIVITY_KINDS, _DEFAULT_ACTIVITY_KIND,
+            ),
+            activity_url=url,
             update_interval_seconds=interval,
             status_emoji=str(cfg("status_emoji", _DEFAULT_EMOJI) or _DEFAULT_EMOJI)[:8],
             idle_after_seconds=idle_after,
@@ -137,9 +181,23 @@ CONFIG_SCHEMA: dict = {
     "enabled": {"type": "bool", "default": True,
                 "description": "Publish agent telemetry as the Discord bot presence"},
     "mode": {"type": "str", "choices": list(MODES), "default": _DEFAULT_MODE,
-             "description": "rotate = one metric per update; compact = all metrics joined"},
-    "activity_type": {"type": "str", "choices": list(ACTIVITY_TYPES), "default": _DEFAULT_ACTIVITY,
-                      "description": "Discord activity kind (custom status vs Playing/Watching)"},
+             "description": (
+                 "rotate = one metric per update; compact = all metrics joined; "
+                 "full = every metric at once with short labels"
+             )},
+    "activity_type": {
+        "type": "str", "choices": list(ACTIVITY_TYPES), "default": _DEFAULT_ACTIVITY,
+        "description": (
+            "custom status, a named activity (Playing/Watching/...), streaming "
+            "(needs activity_url), or both = a custom status and a named "
+            "activity at once, so every metric is visible on two lines"
+        )},
+    "activity_kind": {
+        "type": "str", "choices": list(ACTIVITY_KINDS), "default": _DEFAULT_ACTIVITY_KIND,
+        "description": "Named-activity kind used by activity_type: both"},
+    "activity_url": {
+        "type": "str", "default": "",
+        "description": "Link for a streaming activity (required by Discord)"},
     "update_interval_seconds": {"type": "int", "default": _DEFAULT_INTERVAL,
                                 "description": "Seconds between presence updates (10-600)"},
     "status_emoji": {"type": "str", "default": _DEFAULT_EMOJI,
@@ -172,7 +230,10 @@ CONFIG_SCHEMA: dict = {
 def describe(config: PresenceConfig | None = None) -> str:
     """One-line human summary, used by ``/pulse`` and the CLI command."""
     cfg = config or PresenceConfig()
+    activity = cfg.activity_type
+    if cfg.dual:
+        activity = f"both ({cfg.activity_kind})"
     return (
         f"discord-presence: {'on' if cfg.enabled else 'off'} · {cfg.mode} · "
-        f"{cfg.activity_type} · every {cfg.update_interval_seconds}s"
+        f"{activity} · every {cfg.update_interval_seconds}s"
     )

@@ -268,3 +268,36 @@ class TestOnDemandSurfaces:
 
     def test_pulse_config_prints_the_resolved_settings(self, loaded_plugin):
         assert "discord-presence" in loaded_plugin._handle_pulse("config")
+
+    def test_dual_activity_shows_everything_at_once(self, loaded_plugin):
+        """``mode: full`` + ``activity_type: both`` = every metric, two lines."""
+        _fire_one_turn(loaded_plugin)
+        snap = loaded_plugin.get_collector().snapshot()
+        render = importlib.import_module(f"{loaded_plugin.__name__}.render")
+        config_mod = importlib.import_module(f"{loaded_plugin.__name__}.config")
+
+        cfg = config_mod.PresenceConfig(mode="full", activity_type="both")
+        line1, line2 = render.render_statuses(snap, cfg, 0)
+        assert line2, "the named activity line should carry the leftover metrics"
+
+        combined = f"{line1} {line2}"
+        # Throughput, cache, context, tool, model, latency and lifetime tokens.
+        assert "/s" in combined            # 240 / 2.5 = 96 tokens/sec, lean spelling
+        assert "96" in combined
+        assert "%" in combined             # cache hit + context occupancy
+        assert "terminal" in combined      # the running tool
+        assert "gpt-5.6" in combined       # the active model
+        assert "Σ" in combined             # lifetime tokens
+        assert "◷" in combined             # mean latency
+        # Discord caps each line, and a metric must not appear on both.
+        assert len(line1) <= 128 and len(line2) <= 128
+        assert combined.count("/s") == 1
+
+    def test_dual_mode_default_is_still_one_line(self, loaded_plugin):
+        """Without the opt-in the publisher keeps to a single custom status."""
+        _fire_one_turn(loaded_plugin)
+        snap = loaded_plugin.get_collector().snapshot()
+        render = importlib.import_module(f"{loaded_plugin.__name__}.render")
+
+        line1, line2 = render.render_statuses(snap, loaded_plugin.get_config(), 0)
+        assert line2 is None

@@ -31,6 +31,37 @@ a custom status at 128 characters, so every extra segment competes with the ones
 the user actually asked for — when suggesting one, check the rendered length in
 `compact` mode first.
 
+## Showing everything at once
+
+Discord draws a **custom status and one named activity at the same time**, and
+this plugin can use both. Two settings get every metric on screen together:
+
+```yaml
+mode: full               # every metric on, short labels (⚡ 96/s, ◎ 79%, ▰▰▱▱ 5%)
+activity_type: both      # custom status + a named activity on a second line
+activity_kind: watching  # what that second line is called (playing/watching/...)
+```
+
+Line one carries the custom status, line two the activity the custom status had
+no room for:
+
+```
+📊 ⚡ 96/s · ◎ 79%                              ← custom status
+Watching ▰▰▰▰▰▱▱▱▱▱ 5% · ⧉ terminal · ☤ gpt-5.6  ← activity
+```
+
+In `rotate` mode the split is different: line one shows one metric per update
+and line two carries all the others, so a single tick still shows everything.
+A metric never appears on both lines. When there is nothing for line two — a
+single metric enabled, or an idle session — only the custom status is published.
+
+`activity_type: streaming` makes the activity a "Streaming …" with a link; it
+needs `activity_url` (Discord rejects a streaming activity without one, and the
+plugin silently degrades to `playing` in that case).
+
+`mode: full` deliberately overrides the individual `show_*` switches: it means
+show everything, rendered short enough to fit.
+
 Presence **status dot** follows the same ladder as the status bar:
 
 * `online` while a turn or tool is live;
@@ -79,14 +110,21 @@ plugins:
 
 `rotate` (the default) shows one segment per update so the status stays short
 and legible; `compact` joins every enabled segment and trims from the right to
-fit Discord's 128-character limit.
+fit Discord's 128-character limit; `full` turns every metric on with short
+labels and, with `activity_type: both`, splits them across Discord's two lines
+so all of them are legible at once.
 
 ## Rate limits and safety
 
 Discord allows roughly five presence updates per 20 seconds per session. The
-default 20s interval is well inside that, and the publisher **skips the REST
-call entirely when neither the text nor the status dot changed** — an idle bot
-sends almost nothing.
+default 20s interval is well inside that, and the publisher **skips the gateway
+call entirely when neither line nor the status dot changed** — an idle bot sends
+almost nothing.
+
+Two-line mode sends the presence as a raw op-3 gateway payload, because
+`discord.py`'s `change_presence` accepts a single activity while Discord's
+presence payload carries an array. If the socket cannot be addressed the update
+degrades to one line rather than failing.
 
 Every hook in this plugin is observer-only: nothing rewrites a prompt, blocks a
 tool, or overrides a built-in. A presence failure is logged and swallowed; it

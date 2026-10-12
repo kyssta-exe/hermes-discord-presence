@@ -26,6 +26,35 @@ per update in `rotate` mode, or joins onto one line in `compact` mode:
 📊 ⚡ 96 tok/s · ◎ 79% cache · ▰▰▱▱▱▱▱▱▱▰ · 2% ctx · ⧉ terminal · ☤ gpt-5.6
 ```
 
+### Everything at once, on two lines
+
+Discord draws a **custom status and one named activity at the same time**, and
+the plugin can use both. Two switches:
+
+```yaml
+mode: full             # every metric on, short labels
+activity_type: both    # a custom status AND a "Watching …" line
+activity_kind: watching
+```
+
+Nothing gets dropped to fit 128 characters — the metrics split across the two
+lines Discord already gives you:
+
+```
+📊 ⚡ 96/s · ◎ 79%                                      ← custom status
+Watching ▰▰▰▰▰▱▱▱▱▱ 5% · ⧉ terminal · ☤ gpt-5.6 · Σ 1.2M ← activity
+```
+
+In `rotate` mode the split is different and arguably better: line one rotates one
+metric per update, line two carries **all the others**, so a single tick shows
+every metric — the numbers move between the lines instead of disappearing. A
+metric never appears twice, and when there is nothing for the second line (one
+metric enabled, or an idle session) only the custom status is published.
+
+`activity_type: streaming` makes that second line a "Streaming …" with a
+clickable link — set `activity_url` (Discord requires one for streaming; without
+it the plugin quietly falls back to `playing`).
+
 ## Install
 
 ```bash
@@ -50,7 +79,7 @@ have nowhere to show a status.
 
 | Surface | What it does |
 |---|---|
-| **Discord presence** | Rotating or compact custom status on the gateway's own bot client, plus a status dot that tracks the work |
+| **Discord presence** | Rotating or compact custom status on the gateway's own bot client, plus a status dot that tracks the work — and, in `full`+`both`, every metric split across Discord's two lines |
 | **`/pulse`** | Formatted telemetry report in any gateway session (Discord, Telegram, CLI) |
 | **`agent_pulse` tool** | The model can report its own performance when you ask "how fast are you going?" |
 | **`hermes discord-presence`** | `status` / `json` / `config` / `reset` from a shell |
@@ -107,7 +136,10 @@ between models and you want to see which one actually answered.
 
 Discord caps a custom status at 128 characters, so every extra segment competes
 with the ones you actually asked for. The three defaults fit comfortably; turn
-the rest on one at a time, and watch the length if you use `compact` mode.
+the rest on one at a time, and watch the length if you use `compact` mode. Or
+skip the arithmetic: `mode: full` turns every one of them on with short labels
+(`⚡ 96/s`, `◎ 79%`, `▰▰▰▱ 5%`) and, with `activity_type: both`, splits them
+across both Discord lines.
 
 All of it comes from documented plugin hooks — `post_api_request`,
 `pre_tool_call`, `pre_llm_call`. No core internals, no monkey-patching, no
@@ -134,6 +166,8 @@ plugins:
       settings:
         mode: compact              # everything on one line instead of rotating
         activity_type: watching    # "Watching ⚡ 96 tok/s" instead of a custom status
+        activity_kind: watching    # the second line's kind when activity_type: both
+        activity_url: ""           # link for a streaming activity
         update_interval_seconds: 30
         show_model: false
         show_context_bar: true
@@ -144,8 +178,10 @@ plugins:
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `enabled` | bool | `true` | Publish the presence at all |
-| `mode` | str | `rotate` | `rotate` = one segment per update; `compact` = all joined |
-| `activity_type` | str | `custom` | `custom`, `playing`, `watching`, `listening`, `competing` |
+| `mode` | str | `rotate` | `rotate` = one segment per update; `compact` = all joined and trimmed; `full` = every metric at once with short labels |
+| `activity_type` | str | `custom` | `custom`, `playing`, `watching`, `listening`, `competing`, `streaming`, or `both` (custom status **and** a named activity) |
+| `activity_kind` | str | `watching` | The named line's kind when `activity_type` is `both` |
+| `activity_url` | str | `""` | Link for a `streaming` activity (Discord requires one) |
 | `update_interval_seconds` | int | `20` | Seconds between updates (10–600) |
 | `status_emoji` | str | `📊` | Leading emoji |
 | `idle_after_seconds` | int | `180` | Quiet period before the dot goes idle |
@@ -184,6 +220,11 @@ default 20s interval sits well inside that, and the publisher **skips the REST
 call entirely when neither the text nor the status dot changed** — an idle bot
 sends almost nothing.
 
+A two-line presence (`activity_type: both`) goes out as a raw op-3 gateway
+payload, because `discord.py`'s `change_presence` accepts a single activity while
+Discord's presence payload carries an array. If the socket cannot be addressed
+the update degrades to one line instead of failing.
+
 Every hook is observer-only: nothing rewrites a prompt, blocks a tool, or
 overrides a built-in. The manifest declares **no capabilities**. A presence
 failure is logged and swallowed; it cannot take the gateway down.
@@ -191,15 +232,15 @@ failure is logged and swallowed; it cannot take the gateway down.
 ## Development
 
 ```bash
-python -m pytest tests/ -q          # 98 unit tests, no Hermes needed
+python -m pytest tests/ -q          # 131 unit tests, no Hermes needed
 
-# The 14 end-to-end tests load the plugin through the real PluginManager.
+# The 16 end-to-end tests load the plugin through the real PluginManager.
 # They need a HERMES_HOME with the plugin enabled:
 export HERMES_HOME=/tmp/hx
 mkdir -p $HERMES_HOME/plugins
 cp -r discord-presence $HERMES_HOME/plugins/
 hermes config set plugins.enabled '["discord-presence"]'
-python -m pytest tests/ -q          # 112 total
+python -m pytest tests/ -q          # 147 total
 
 hermes plugins doctor discord-presence      # discovery + register() smoke test
 hermes plugins validate discord-presence    # the catalog admission gate
@@ -208,7 +249,7 @@ hermes plugins validate discord-presence    # the catalog admission gate
 ## Layout
 
 ```
-plugin.yaml          manifest v2 + config_schema (18 keys)
+plugin.yaml          manifest v2 + config_schema (20 keys)
 pyproject.toml       PM dependency declaration (no runtime deps)
 __init__.py          register(ctx): hooks, platform handler, tool, CLI, skill
 metrics.py           thread-safe rolling window over hook payloads
@@ -222,7 +263,10 @@ skills/discord-presence/SKILL.md
 
 `render.py` and `metrics.py` deliberately have no `discord` import, so the
 number-crunching is unit-testable and `register()` works on a host where
-discord.py was never installed.
+discord.py was never installed. `render.py` owns the one-line rendering and the
+two-line split (`render_statuses`); `presence.py` turns those strings into
+discord.py activity objects — and, for a two-line presence, into the op-3
+gateway payload `discord.py` itself cannot build.
 
 ## License
 
